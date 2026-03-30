@@ -186,12 +186,7 @@ export class NvmeofService {
     return this.http.get(`${API_PATH}/subsystem/${subsystemNQN}?gw_group=${group}`);
   }
 
-  createSubsystem(request: {
-    nqn: string;
-    enable_ha: boolean;
-    gw_group: string;
-    dhchap_key: string;
-  }) {
+  createSubsystem(request: { nqn: string; gw_group: string; dhchap_key: string }) {
     return this.http.post(`${API_PATH}/subsystem`, request, { observe: 'response' });
   }
 
@@ -223,13 +218,9 @@ export class NvmeofService {
   }
 
   addNamespaceInitiators(nsid: number | string, request: NamespaceInitiatorRequest) {
-    return this.http.post(
-      `${UI_API_PATH}/subsystem/${request.subsystem_nqn}/namespace/${nsid}/host`,
-      request,
-      {
-        observe: 'response'
-      }
-    );
+    return this.http.post(`${UI_API_PATH}/namespace/${nsid}/host`, request, {
+      observe: 'response'
+    });
   }
 
   updateHostKey(subsystemNQN: string, request: InitiatorRequest) {

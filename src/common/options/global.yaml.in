@@ -2037,19 +2037,19 @@ options:
   see_also:
   - mon_debug_dump_transactions
   with_legacy: true
-- name: mon_debug_no_require_squid
+- name: mon_debug_no_require_tentacle
   type: bool
   level: dev
-  desc: Do not require the Squid feature for new Monitor clusters
+  desc: Do not require the Tentacle feature for new Monitor clusters
   default: false
   services:
   - mon
   flags:
   - cluster_create
-- name: mon_debug_no_require_tentacle
+- name: mon_debug_no_require_umbrella
   type: bool
   level: dev
-  desc: Do not require the Tentacle feature for new Monitor clusters
+  desc: Do not require the Umbrella feature for new Monitor clusters
   default: false
   services:
   - mon
@@ -4515,6 +4515,18 @@ options:
   flags:
   - create
   with_legacy: true
+- name: bluestore_use_ebd
+  type: bool
+  level: advanced
+  desc: EBD plugin used during mkfs is required for mounts.
+  long_desc: The flag has two effects, on mkfs and on mount.
+    If set for mkfs and EBD plugin did attach to the device then save plugin name to OSD metadata.
+    If set when mounting and plugin name is stored in OSD metadata then refuse to mount.
+    The flag has no meaning if the device has no associated EBD plugin.
+  default: true
+  see_also:
+  - osd_extblkdev_plugins
+  with_legacy: true
 - name: bluestore_bdev_label_multi
   type: bool
   level: advanced
@@ -4765,7 +4777,7 @@ options:
   desc: Default value of bluestore_compression_min_blob_size for rotational media
   fmt_desc: Default value of ``bluestore compression min blob size``
     for rotational media.
-  default: 8_K
+  default: 64_K
   see_also:
   - bluestore_compression_min_blob_size
   flags:
@@ -5865,6 +5877,15 @@ options:
   flags:
   - runtime
   with_legacy: true
+- name: bluestore_bluefs_warn_ratio
+  type: float
+  level: basic
+  desc: The ratio at which BlueFS usage relative to the main device raises a
+    health warning. Set to "1" to disable.
+  default: 0.06
+  with_legacy: false
+  flags:
+  - runtime
 # rocksdb options that will be used for omap(if omap_backend is rocksdb)
 - name: filestore_rocksdb_options
   type: str

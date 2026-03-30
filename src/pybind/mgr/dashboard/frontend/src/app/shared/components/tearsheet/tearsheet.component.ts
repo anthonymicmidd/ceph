@@ -10,7 +10,8 @@ import {
   DestroyRef,
   OnDestroy,
   ChangeDetectionStrategy,
-  TemplateRef
+  TemplateRef,
+  ViewEncapsulation
 } from '@angular/core';
 import { FormBuilder } from '@angular/forms';
 import { Step } from 'carbon-components-angular';
@@ -54,7 +55,8 @@ formgroup: CdFormGroup;
   standalone: false,
   templateUrl: './tearsheet.component.html',
   styleUrls: ['./tearsheet.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  encapsulation: ViewEncapsulation.None
 })
 export class TearsheetComponent implements OnInit, AfterViewInit, OnDestroy {
   @Input() title!: string;
@@ -154,8 +156,13 @@ export class TearsheetComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   onNext() {
-    const formEl = document.querySelector('form');
-    formEl?.dispatchEvent(new Event('submit', { bubbles: true }));
+    const currentForm = this.stepContents?.toArray()?.[this.currentStep]?.stepComponent?.formGroup;
+    currentForm?.markAllAsTouched();
+    currentForm?.updateValueAndValidity({ emitEvent: true });
+    if (currentForm) {
+      this._updateStepInvalid(this.currentStep, currentForm.invalid);
+    }
+
     if (this.currentStep !== this.lastStep && !this.steps[this.currentStep].invalid) {
       this.currentStep = this.currentStep + 1;
       this.stepChanged.emit({ current: this.currentStep });

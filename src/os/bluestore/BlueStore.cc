@@ -62,6 +62,7 @@
 #include "Writer.h"
 #include "Compression.h"
 #include "BlueAdmin.h"
+#include "extblkdev/ExtBlkDevPlugin.h"
 
 #if defined(WITH_LTTNG)
 #define TRACEPOINT_DEFINE
@@ -153,6 +154,9 @@ const vector<uint64_t> bdev_label_positions = {
   100*_1G,
   1000*_1G};
 
+#ifdef BLUESTORE_COMMON_CPUTRACE
+cpucounter_group BlueStore::cputrace_bluestore("bluestore");
+#endif
 /*
  * extent map blob encoding
  *
@@ -4352,6 +4356,7 @@ void BlueStore::ExtentMap::maybe_load_shard(
     ceph_assert((size_t)start < shards.size());
     auto p = &shards[start];
     if (!p->loaded) {
+      BLUE_SCOPE(maybe_load_shard);
       dout(30) << __func__ << " opening shard 0x" << std::hex
 	       << p->shard_info->offset << std::dec << dendl;
       bufferlist v;
@@ -4913,6 +4918,7 @@ void BlueStore::Onode::put()
     c->get_onode_cache()->maybe_unpin(this);
   }
   if (--nref == 0) {
+    BLUE_SCOPE(onode_put);
     delete this;
   }
 }
@@ -5326,7 +5332,7 @@ BlueStore::OnodeRef BlueStore::Collection::get_onode(
   OnodeRef o = onode_space.lookup(oid);
   if (o)
     return o;
-
+  BLUE_SCOPE(get_onode);
   string key;
   get_object_key(store->cct, oid, &key);
 
@@ -5851,7 +5857,11 @@ void BlueStore::handle_conf_change(const ConfigProxy& conf,
   if (changed.count("bluestore_compression_mode") ||
       changed.count("bluestore_compression_algorithm") ||
       changed.count("bluestore_compression_min_blob_size") ||
-      changed.count("bluestore_compression_max_blob_size")) {
+      changed.count("bluestore_compression_min_blob_size_hdd") ||
+      changed.count("bluestore_compression_min_blob_size_ssd") ||
+      changed.count("bluestore_compression_max_blob_size") ||
+      changed.count("bluestore_compression_max_blob_size_hdd") ||
+      changed.count("bluestore_compression_max_blob_size_ssd")) {
     if (bdev) {
       _set_compression();
     }
@@ -7143,7 +7153,15 @@ int BlueStore::_open_bdev(bool create)
   ceph_assert(bdev == NULL);
   string p = path + "/block";
   bdev = BlockDevice::create(cct, p, aio_cb, static_cast<void*>(this), discard_cb, static_cast<void*>(this), "bluestore");
-  int r = bdev->open(p);
+  int r = 0;
+  int plugin_preload_r = 0;
+  if (cct->_conf->bluestore_use_ebd) {
+    //load plugins
+    plugin_preload_r = extblkdev::preload(cct);
+    // do not complain yet. wait until we check "extblkdev" meta.
+  }
+
+  r = bdev->open(p);
   if (r < 0)
     goto fail;
 
@@ -7154,6 +7172,37 @@ int BlueStore::_open_bdev(bool create)
     whole_device.insert(0, bdev->get_size());
     bdev->try_discard(whole_device, false, true);
     dout(5) << __func__ << " trimmed device:" << p << dendl;
+  }
+
+  if (!create && cct->_conf->bluestore_use_ebd) {
+    // for regular bdev opens check if it was deployed with plugin
+    string meta_plugin_id;
+    r = read_meta("extblkdev", &meta_plugin_id);
+    if (r == 0) {
+      // plugin selection fixed to meta, plugins must be loaded
+      if (plugin_preload_r != 0) {
+        // we will complain twice - once generally about not loading plugins,
+        // and later that specific plugin is not ready
+        derr << "Failed preloading extblkdev plugins, error code: " << plugin_preload_r << dendl;
+      }
+      string bdev_plugin_id;
+      r = bdev->get_ebd_id(bdev_plugin_id);
+      bool is_osd = cct->get_module_type() & CEPH_ENTITY_TYPE_OSD;
+      if (r != 0) {
+        derr << __func__ << " plugin " << meta_plugin_id << " not loaded" << dendl;
+        if (is_osd) {
+          goto fail_close;
+        }
+      } else {
+        if (meta_plugin_id != bdev_plugin_id) {
+          derr << __func__ << " plugin '" << meta_plugin_id << "' used on mkfs, "
+            << "but now uses plugin '" << bdev_plugin_id << "'" << dendl;
+          if (is_osd) {
+            goto fail_close;
+          }
+        }
+      }
+    }
   }
 
   if (bdev->supported_bdev_label()) {
@@ -8613,6 +8662,20 @@ int BlueStore::mkfs()
       r = write_meta("type", "bluestore");
       if (r < 0)
         return r;
+    }
+  }
+  if (cct->_conf->bluestore_use_ebd) {
+    // check if EBD plugin is enabled
+    string plugin_id;
+    r = bdev->get_ebd_id(plugin_id);
+    if (r == 0) {
+      // retrieved name, save plugin into bdev metadata
+      r = write_meta("extblkdev", plugin_id);
+      if (r < 0)
+        return r;
+    } else {
+      // Non zero result is not a problem, it just means we do not have EBD plugin.
+      r = 0;
     }
   }
 
@@ -14337,6 +14400,7 @@ void BlueStore::_txc_update_store_statfs(TransContext *txc)
 
 void BlueStore::_txc_state_proc(TransContext *txc)
 {
+  BLUE_SCOPE(txc_state_proc);
   while (true) {
     dout(10) << __func__ << " txc " << txc
 	     << " " << txc->get_state_name() << dendl;
@@ -14491,6 +14555,7 @@ void BlueStore::_txc_finish_io(TransContext *txc)
 
 void BlueStore::_txc_write_nodes(TransContext *txc, KeyValueDB::Transaction t)
 {
+  BLUE_SCOPE(txc_write_nodes);
   dout(20) << __func__ << " txc " << txc
 	   << " onodes " << txc->onodes
 	   << " shared_blobs " << txc->shared_blobs
@@ -14554,6 +14619,7 @@ void BlueStore::BSPerfTracker::update_from_perfcounters(
 
 void BlueStore::_txc_finalize_kv(TransContext *txc, KeyValueDB::Transaction t)
 {
+  BLUE_SCOPE(txc_finalize_kv);
   dout(20) << __func__ << " txc " << txc << std::hex
 	   << " allocated 0x" << txc->allocated
 	   << " released 0x" << txc->released
@@ -15795,8 +15861,10 @@ void BlueStore::_txc_aio_submit(TransContext *txc)
   bdev->aio_submit(&txc->ioc);
 }
 
+
 void BlueStore::_txc_add_transaction(TransContext *txc, Transaction *t)
 {
+  BLUE_SCOPE(txc_add_transaction);
   Transaction::iterator i = t->begin();
 
   _dump_transaction<30>(cct, t);
@@ -19294,6 +19362,32 @@ void BlueStore::_log_alerts(osd_alert_list_t& alerts)
       spillover_alert = ss.str();
   } else if (!spillover_alert.empty()){
     spillover_alert.clear();
+  }
+  // CHECK: BlueFS usage relative to main device size
+  if (bluefs) {
+    uint64_t db_used = bluefs->get_used(BlueFS::BDEV_DB);
+    uint64_t wal_used = bluefs->get_used(BlueFS::BDEV_WAL);
+    uint64_t slow_used = bluefs->get_used(BlueFS::BDEV_SLOW);
+    uint64_t main_size = bdev->get_size();
+
+    if (main_size > 0) {
+      uint64_t total_bluefs_usage = db_used + wal_used + slow_used;
+      double ratio = static_cast<double>(total_bluefs_usage) /
+                     static_cast<double>(main_size);
+      double warn_ratio =
+        cct->_conf.get_val<double>("bluestore_bluefs_warn_ratio");
+
+      if (ratio > warn_ratio) {
+        ostringstream ss;
+        ss << "BlueFS usage (" << byte_u_t(total_bluefs_usage)
+           << ") exceeds " << std::fixed << std::setprecision(4)
+           << (warn_ratio * 100.0) << "% of main device ("
+           << byte_u_t(main_size) << ", "
+           << std::fixed << std::setprecision(2)
+           << ratio * 100.0 << "%)";
+        alerts.emplace("BLUESTORE_BLUEFS_OVERSIZED", ss.str());
+      }
+    }
   }
   if (cct->_conf->bluestore_slow_ops_warn_threshold) {
     size_t qsize = _trim_slow_op_event_queue(mono_clock::now());

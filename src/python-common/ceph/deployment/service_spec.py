@@ -936,6 +936,14 @@ class ServiceSpec(object):
         sub_cls: Any = cls._cls(service_type)
         return object.__new__(sub_cls)
 
+    def __getnewargs__(self) -> tuple[str]:
+        """
+        Pickle will pass the return of this function to __new__ upon
+        unpickle.  We need to ensure it gets service_type in order
+        to get the right subtype.
+        """
+        return (self.service_type,)
+
     def __init__(self,
                  service_type: str,
                  service_id: Optional[str] = None,
@@ -1741,6 +1749,7 @@ class NvmeofServiceSpec(ServiceSpec):
                  monitor_timeout: Optional[float] = 1.0,
                  enable_monitor_client: bool = True,
                  monitor_client_log_file_dir: Optional[str] = '',
+                 kmip_cert_dir: Optional[str] = './certs/kmip/{server_name}',
                  placement: Optional[PlacementSpec] = None,
                  unmanaged: bool = False,
                  preview_only: bool = False,
@@ -1964,6 +1973,8 @@ class NvmeofServiceSpec(ServiceSpec):
         self.enable_monitor_client = enable_monitor_client
         #: ``monitor_client_log_file_dir`` the monitor client log output file file directory
         self.monitor_client_log_file_dir = monitor_client_log_file_dir
+        #: ``kmip_cert_dir`` directory for KMIP servers keys and certificates
+        self.kmip_cert_dir = kmip_cert_dir
 
     def get_port_start(self) -> List[int]:
         return [self.port, 4420, self.discovery_port, self.prometheus_port]
@@ -2438,6 +2449,8 @@ class MgmtGatewaySpec(ServiceSpec):
         ports = []
         if self.port is not None:
             ports.append(cast(int, self.port))
+        else:
+            ports.append(443)  # default HTTPS port
         return ports
 
     def validate(self) -> None:
@@ -3832,6 +3845,10 @@ class SMBSpec(ServiceSpec):
         remote_control_ssl_cert: Optional[str] = None,
         remote_control_ssl_key: Optional[str] = None,
         remote_control_ca_cert: Optional[str] = None,
+        # == keybridge ==
+        keybridge_kmip_ssl_cert: Optional[str] = None,
+        keybridge_kmip_ssl_key: Optional[str] = None,
+        keybridge_kmip_ca_cert: Optional[str] = None,
         # === cluster configs ===
         # ceph_cluster_configs - An optional list of extra ceph clusters
         # typically external to the current cluster that the smb services
@@ -3877,6 +3894,9 @@ class SMBSpec(ServiceSpec):
         self.remote_control_ssl_cert = remote_control_ssl_cert
         self.remote_control_ssl_key = remote_control_ssl_key
         self.remote_control_ca_cert = remote_control_ca_cert
+        self.keybridge_kmip_ssl_cert = keybridge_kmip_ssl_cert
+        self.keybridge_kmip_ssl_key = keybridge_kmip_ssl_key
+        self.keybridge_kmip_ca_cert = keybridge_kmip_ca_cert
         self.ceph_cluster_configs = SMBExternalCephCluster.convert_list(
             ceph_cluster_configs
         )

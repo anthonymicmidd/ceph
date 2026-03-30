@@ -103,6 +103,11 @@ public:
                                            "Dump internal statistics for bluefs."
                                            "");
         ceph_assert(r == 0);
+        r = admin_socket->register_command("bluefs stats reset",
+                                           hook,
+                                           "Reset maximum historical value for bluefs statistics."
+                                           "");
+        ceph_assert(r == 0);
 	r = admin_socket->register_command("bluefs files list", hook,
 					   "print files in bluefs");
 	ceph_assert(r == 0);
@@ -161,6 +166,10 @@ private:
       std::stringstream ss;
       bluefs->dump_block_extents(ss);
       bluefs->dump_volume_selector(ss);
+      out.append(ss);
+    } else if (command == "bluefs stats reset") {
+      std::stringstream ss;
+      bluefs->reset_volume_selector(ss);
       out.append(ss);
     } else if (command == "bluefs files list") {
       const char* devnames[3] = {"wal","db","slow"};
@@ -622,7 +631,6 @@ uint64_t BlueFS::_get_used(unsigned id) const
 uint64_t BlueFS::get_used(unsigned id)
 {
   ceph_assert(id < alloc.size());
-  ceph_assert(alloc[id]);
   return _get_used(id);
 }
 
@@ -2069,7 +2077,7 @@ int BlueFS::device_migrate_to_existing(
 	to_release.emplace_back(old_ext.offset, old_ext.length);
 	alloc[old_ext.bdev]->release(to_release);
         if (is_shared_alloc(old_ext.bdev)) {
-          shared_alloc->bluefs_used -= to_release.size();
+          shared_alloc->bluefs_used -= old_ext.length;
         }
       }
 
@@ -2209,7 +2217,7 @@ int BlueFS::device_migrate_to_new(
 	to_release.emplace_back(old_ext.offset, old_ext.length);
 	alloc[old_ext.bdev]->release(to_release);
         if (is_shared_alloc(old_ext.bdev)) {
-          shared_alloc->bluefs_used -= to_release.size();
+          shared_alloc->bluefs_used -= old_ext.length;
         }
       }
 
@@ -5469,6 +5477,11 @@ void* RocksDBBlueFSVolumeSelector::get_hint_by_dir(std::string_view dirname) con
     }
   }
   return reinterpret_cast<void*>(res);
+}
+
+void RocksDBBlueFSVolumeSelector::reset_history(ostream& sout) {
+  per_level_per_dev_max.clear();
+  sout << "Reset done." << std::endl;
 }
 
 void RocksDBBlueFSVolumeSelector::dump(ostream& sout) {

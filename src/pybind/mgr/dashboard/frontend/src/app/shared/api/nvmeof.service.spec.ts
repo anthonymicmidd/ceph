@@ -164,8 +164,6 @@ describe('NvmeofService', () => {
     it('should call createSubsystem', () => {
       const request = {
         nqn: mockNQN,
-        enable_ha: true,
-        initiators: '*',
         gw_group: mockGroupName,
         dhchap_key: null
       };
@@ -284,6 +282,18 @@ describe('NvmeofService', () => {
         `${API_PATH}/subsystem/${mockNQN}/namespace/${mockNsid}?gw_group=${mockGroupName}`
       );
       expect(req.request.method).toBe('DELETE');
+    });
+
+    it('should call addNamespaceInitiators with UI namespace host endpoint', () => {
+      const request = {
+        subsystem_nqn: mockNQN,
+        host_nqn: 'nqn.2014-08.org.nvmexpress:uuid:11111111-1111-1111-1111-111111111111',
+        gw_group: mockGroupName
+      };
+      service.addNamespaceInitiators(mockNsid, request).subscribe();
+      const req = httpTesting.expectOne(`${UI_API_PATH}/namespace/${mockNsid}/host`);
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body).toEqual(request);
     });
   });
 

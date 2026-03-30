@@ -8,7 +8,7 @@
 #include "include/buffer.h"
 
 #include "crimson/common/errorator.h"
-#include "crimson/common/errorator-loop.h"
+#include "crimson/common/errorator-utils.h"
 #include "crimson/os/seastore/backref_entry.h"
 #include "crimson/os/seastore/cached_extent.h"
 #include "crimson/os/seastore/extent_placement_manager.h"
@@ -106,7 +106,7 @@ class SegmentProvider;
 class Cache : public ExtentTransViewRetriever,
 	      public RetiredExtentPlaceholderInvalidater {
 public:
-  Cache(ExtentPlacementManager &epm);
+  Cache(ExtentPlacementManager &epm, store_index_t store_index);
   ~Cache();
 
   cache_stats_t get_stats(bool report_detail, double seconds) const;
@@ -1822,7 +1822,7 @@ private:
   }
 
   seastar::metrics::metric_group metrics;
-  void register_metrics();
+  void register_metrics(store_index_t store_index);
 
   void apply_backref_mset(
       backref_entry_refs_t& backref_entries) {
